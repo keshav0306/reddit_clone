@@ -33,6 +33,7 @@ async function verifyToken(token){
     
 }
 
+// make a new subgreddit
 app.post('/mysubgreddit', async (req, res) => {
     var verify = await verifyToken(req.headers['authorization']);
     if(!verify.valid){
@@ -44,13 +45,21 @@ app.post('/mysubgreddit', async (req, res) => {
     srobj.users = [verify.uname];
     srobj.blockedUsers = [];
     srobj.joinRequests = [];
+    srobj.creationTime = new Date();
     // stats left
     let result = await client.connect();
+    try{
     result = await client.db("konoha").collection("subreddit").insertOne(srobj);
+    }
+    catch{
+    res.json({"created" : false})
+    return
+    }
     res.json({"created" : true})
     }
 })
 
+// give all the users joined subgreddits
 app.get('/joinedSubgreddit', async (req, res) => {
     var verify = await verifyToken(req.headers['authorization']);
     if(!verify.valid){
@@ -60,14 +69,19 @@ app.get('/joinedSubgreddit', async (req, res) => {
         console.log("hi");
     let result = await client.connect();
     const options = {
-        projection : {_id : 0, joinRequests : 0, blockedUsers : 0, users : 0}
+        projection : {_id : 0, joinRequests : 0, blockedUsers : 0}
     }
     result = await client.db("konoha").collection("subreddit").find({users : verify.uname}, options).toArray();
+    for(let i=0;i<result.length;i++){
+        let len = result[i].users.length
+        result[i].users = len
+    }
     console.log(result)
     res.json(result)
     }
 })
 
+// give all the subgreddits info
 app.get('/allSubgreddits', async (req, res) => {
     var verify = await verifyToken(req.headers['authorization']);
     if(!verify.valid){
@@ -77,14 +91,20 @@ app.get('/allSubgreddits', async (req, res) => {
 
     let result = await client.connect();
     const options = {
-        projection : {_id : 0, joinRequests : 0, blockedUsers : 0, users : 0}
+        projection : {_id : 0, joinRequests : 0, blockedUsers : 0}
     }
     result = await client.db("konoha").collection("subreddit").find({}, options).toArray();
+    for(let i=0;i<result.length;i++){
+        let len = result[i].users.length
+        result[i].users = len
+    }
     console.log(result)
     res.json(result)
     }
 })
 
+// join a subgreddit 
+// i.e send a follow request
 app.get('/joinsr/:name', async (req, res) => {
     var verify = await verifyToken(req.headers['authorization']);
     if(!verify.valid){
@@ -106,7 +126,7 @@ app.get('/joinsr/:name', async (req, res) => {
 
 // get all posts in the subreddit
 // the requesting user must be a part of the subreddit
-app.get('/subgreddits/:name', async (req, res) => {
+app.get('/subgreddits/:name/posts', async (req, res) => {
     var verify = await verifyToken(req.headers['authorization']);
     if(!verify.valid){
         res.send("Invalid Token")
@@ -130,7 +150,34 @@ app.get('/subgreddits/:name', async (req, res) => {
         }
 })
 
-
+// get basic info about the subreddit
+// the requesting user must be a part of the subreddit
+app.get('/subgreddits/:name', async (req, res) => {
+    var verify = await verifyToken(req.headers['authorization']);
+    if(!verify.valid){
+        res.send("Invalid Token")
+    }
+    else{
+        var post = {text : req.body.text};
+        // stats left
+        let result = await client.connect();
+        result = await client.db("konoha").collection("subreddit").findOne({name : req.params.name});
+        var usersList = result.users;
+        memberFlag = 0;
+        for(i=0;i<usersList.length;i++){
+            if(usersList[i] == verify.uname){
+                memberFlag = 1
+            }
+        }
+        if(memberFlag){
+            const options = {
+                projection : {_id : 0, joinRequests : 0, blockedUsers : 0, users: 0}
+            }
+            result = await client.db("konoha").collection("subreddit").findOne({name : req.params.name}, options);
+            res.json(result)
+        }
+        }
+})
 
 // report a post with post_id
 
@@ -168,6 +215,85 @@ app.post('/report/:id', async (req, res) => {
         }
 })
 
+// upvote a post with post_id
+
+app.put('/upvote/:id', async (req, res) => {
+    var verify = await verifyToken(req.headers['authorization']);
+    if(!verify.valid){
+        res.send("Invalid Token")
+    }
+    else{
+        // stats left
+        console.log("in id");
+        let result = await client.connect();
+        result = await client.db("konoha").collection("posts").findOne({_id : new ObjectId(req.params.id)});
+        console.log(result);
+        var reportedsrd = await client.db("konoha").collection("subreddit").findOne({name : result.postedIn});
+        var usersList = reportedsrd.users;
+        memberFlag = 0;
+        for(i=0;i<usersList.length;i++){
+            if(usersList[i] == verify.uname){
+                memberFlag = 1
+            }
+        }
+        if(memberFlag){
+            console.log("inside")
+            filter = await client.db("konoha").collection("posts").findOne({_id : new ObjectId(req.params.id)});
+            var upvotesUsers = result.upvotes
+            for(let i=0;i<upvotesUsers.length;i++){
+                if(upvotesUsers[i] == verify.uname){
+                    res.send("you have already upvoted once")
+                    return
+                }
+            }
+            update = {$push : {upvotes : verify.uname}};
+            console.log("in in")
+            result = await client.db("konoha").collection("posts").updateOne(filter, update);
+            res.send(result)
+            
+        }
+        }
+})
+
+// downvote a post with post_id
+
+app.put('/downvote/:id', async (req, res) => {
+    var verify = await verifyToken(req.headers['authorization']);
+    if(!verify.valid){
+        res.send("Invalid Token")
+    }
+    else{
+        // stats left
+        console.log("in id");
+        let result = await client.connect();
+        result = await client.db("konoha").collection("posts").findOne({_id : new ObjectId(req.params.id)});
+        console.log(result);
+        var reportedsrd = await client.db("konoha").collection("subreddit").findOne({name : result.postedIn});
+        var usersList = reportedsrd.users;
+        memberFlag = 0;
+        for(i=0;i<usersList.length;i++){
+            if(usersList[i] == verify.uname){
+                memberFlag = 1
+            }
+        }
+        if(memberFlag){
+            console.log("inside")
+            filter = await client.db("konoha").collection("posts").findOne({_id : new ObjectId(req.params.id)});
+            var downvotesUsers = result.downvotes
+            for(let i=0;i<downvotesUsers.length;i++){
+                if(downvotesUsers[i] == verify.uname){
+                    res.send("you have already upvoted once")
+                    return
+                }
+            }
+            update = {$push : {downvotes : verify.uname}};
+            console.log("in in")
+            result = await client.db("konoha").collection("posts").updateOne(filter, update);
+            res.send(result)
+        }
+        }
+})
+
 // create a post in the subreddit with name 'name'
 // the requesting user must be a part of the subreddit
 
@@ -177,7 +303,6 @@ app.post('/subgreddits/:name', async (req, res) => {
         res.send("Invalid Token")
     }
     else{
-        var post = {text : req.body.text};
         // stats left
         let result = await client.connect();
         result = await client.db("konoha").collection("subreddit").findOne({name : req.params.name});
@@ -189,13 +314,31 @@ app.post('/subgreddits/:name', async (req, res) => {
             }
         }
         if(memberFlag){
-            post.upvotes = 0
-            post.downvotes = 0
+            var text = req.body.text
+            var words = text.split(' ')
+            banned = result.bannedkwrds
+            banbool = false
+            console.log(banned)
+            console.log(words)
+            for(let i=0;i<words.length;i++){
+                for(let j=0;j<banned.length;j++){
+                    if(words[i] == banned[j]){
+                        len = words[i].length
+                        words[i] = new Array(len + 1).join('*')
+                        banbool = true
+                        break;
+                    }
+                }
+            }
+            var final = words.join(" ")
+            var post = {text : final};
+            post.upvotes = []
+            post.downvotes = []
             post.comments = []
             post.postedBy = verify.uname
             post.postedIn = req.params.name
             result = await client.db("konoha").collection("posts").insertOne(post);
-            res.json(result)
+            res.json({created : true, bannedKwrd : banbool})
         }
         }
 })
@@ -315,7 +458,7 @@ app.get('/mysubgreddit/:name/jr', async (req, res) => {
     else{
     let result = await client.connect();
     result = await client.db("konoha").collection("subreddit").findOne({moderator : verify.uname, name : req.params.name})
-    if(!result){
+    if(result == null){
         res.send("error");
     }
     let users = result.joinRequests
@@ -502,6 +645,7 @@ app.get('/user', async(req, res) => {
     }
 })
 
+// update the details of the user
 
 app.put('/user', async(req, res) => {
     var verify = await verifyToken(req.headers['authorization']);
@@ -536,8 +680,13 @@ app.post('/register', async (req, res) => {
     uobj.password = hash
     uobj.followers = []
     uobj.following = []
+    try{
     result = await client.db("konoha").collection("users").insertOne(uobj);
-    console.log(result);
+    }
+    catch{
+        res.send({allow : 0, "token" : null})
+        return
+    }
     const token = jwt.sign({username : uobj.uname}, secretKey)
     var obj = {allow : 1, "token" : token};
     res.json(obj);
@@ -548,7 +697,13 @@ app.post('/login', async (req, res) => {
     let result = await client.connect();
     var storedUname = await client.db("konoha").collection("users").findOne({uname : uobj.uname});
     console.log(storedUname);
+    try{
     result = await bcrypt.compare(uobj.password, storedUname.password);
+    }
+    catch{
+        res.send({"allow" : false, "token" : null})
+        return
+    }
     console.log(result);
     var allow = false;
     let token = null;
@@ -572,7 +727,10 @@ async function run() {
     // Establish and verify connection
     console.log("after connect");
     const db = client.db("konoha");
-    const result = await client.db("konoha").collection("users").createIndex({"uname" : 1});
+    result = await client.db("konoha").collection("users").createIndex({"uname" : 1}, {unique : true});
+    result = await client.db("konoha").collection("subreddit").createIndex({"name" : 1}, {unique : true});
+
+    console.log(result)
     // const result = await collection.findMany();
     // const databases = await client.db('admin').command({ listDatabases: 1 });
     // console.log(result);
