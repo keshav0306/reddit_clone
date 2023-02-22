@@ -78,6 +78,8 @@ app.post('/mysubgreddit', async (req, res) => {
     srobj.joinRequests = [];
     srobj.visitors = [];
     srobj.userJt = [];
+    srobj.reportedPosts = 0;
+    srobj.deletedPosts = 0;
     srobj.postTime = [];
     srobj.creationTime = new Date();
     // stats left
@@ -104,6 +106,7 @@ app.delete('/removeReport/:id', async (req, res) => {
     console.log("in remove")
     let result = await client.connect();
     result = await client.db("konoha").collection("reports").deleteOne({_id : new ObjectId(req.params.id)});
+    
     console.log(result)
     res.json(result)
     }
@@ -167,6 +170,18 @@ app.get('/joinsr/:name', async (req, res) => {
     }
     else{
     let result = await client.connect();
+    
+    filter = await client.db("konoha").collection("users").findOne({uname : verify.uname});
+    console.log(filter)
+    left = filter.leftSubreddits
+    console.log(left)
+    for(let i=0;i<left.length;i++){
+        if(req.params.name == left[i]){
+            console.log("ajfndknsfdknj")
+            res.json({request : 0});
+            return;
+        }
+    }
     const options = {
         projection : {_id : 0, joinRequests : 0, blockedUsers : 0, users : 0}
     }
@@ -175,7 +190,7 @@ app.get('/joinsr/:name', async (req, res) => {
     const update = {$push : {joinRequests : verify.uname}};
     const updateSrdt = await client.db("konoha").collection("subreddit").updateOne(filter, update);
     console.log(updateSrdt)
-    res.json(updateSrdt)
+    res.json({request : 1});
     }
 })
 
@@ -203,6 +218,23 @@ app.get('/subgreddits/:name/posts', async (req, res) => {
             res.json(result)
         }
         }
+})
+
+// comment in the post
+// the requesting user must be a part of the subreddit
+app.post('/comment/:id', async (req, res) => {
+    var verify = await verifyToken(req.headers['authorization']);
+    if(!verify.valid){
+        res.send("Invalid Token")
+    }
+    else{
+        console.log(req.body)
+        let result = await client.connect();
+        result = await client.db("konoha").collection("posts").findOne({_id : new ObjectId(req.params.id)})
+        let update = {$push : {comments : {text : req.body.text, user : verify.uname}}}
+        let commentRes = await client.db("konoha").collection("posts").updateOne(result, update);
+        res.json(result)
+    }
 })
 
 // get basic info about the subreddit
@@ -260,6 +292,7 @@ app.post('/report/:id', async (req, res) => {
             }
         }
         if(memberFlag){
+            
             let report = {};
             report.reportedBy = verify.uname;
             report.text = result.text
@@ -269,6 +302,8 @@ app.post('/report/:id', async (req, res) => {
             report.moderator = reportedsrd.moderator
             report.srd = reportedsrd.name;
             result = await client.db("konoha").collection("reports").insertOne(report);
+            update = {$inc : {reportedPosts : 1}};
+            result = await client.db("konoha").collection("subreddit").updateOne(reportedsrd, update);
             res.json(result)
         }
         }
@@ -513,6 +548,9 @@ app.get('/mysubgreddit/:name/block/:uname', async (req, res) => {
     }
     else{
     let result = await client.connect();
+    update = {$set : {postedBy : "Blocked User"}};
+    result = await client.db("konoha").collection("posts").updateMany({postedBy : req.params.uname, postedIn : req.params.name}, update);
+
     filter = await client.db("konoha").collection("subreddit").findOne({name : req.params.name, moderator : verify.uname});
     update = {$push : {blockedUsers : req.params.uname}};
     result = await client.db("konoha").collection("subreddit").updateOne(filter, update);
@@ -520,6 +558,29 @@ app.get('/mysubgreddit/:name/block/:uname', async (req, res) => {
     update = {$pull : {users : req.params.uname}};
     result = await client.db("konoha").collection("subreddit").updateOne(filter, update);
     
+    console.log(result);
+    res.json(result)
+    }
+})
+
+// leave a subreddit
+app.put('/leave/:name', async (req, res) => {
+    var verify = await verifyToken(req.headers['authorization']);
+    if(!verify.valid){
+        res.send("Invalid Token")
+    }
+    else{
+    let result = await client.connect();
+
+    filter = await client.db("konoha").collection("subreddit").findOne({name : req.params.name});
+    update = {$pull : {users : verify.uname}};
+    result = await client.db("konoha").collection("subreddit").updateOne(filter, update);
+
+    filter = await client.db("konoha").collection("users").findOne({uname : verify.uname});
+    update = {$push : {leftSubreddits : req.params.name}};
+    result = await client.db("konoha").collection("users").updateOne(filter, update);
+
+
     console.log(result);
     res.json(result)
     }
@@ -536,6 +597,10 @@ app.delete('/mysubgreddit/:name/deletePost/:id', async (req, res) => {
     console.log("in delete post")
     console.log(req.params.id)
     result = await client.db("konoha").collection("posts").deleteOne({_id : new ObjectId(req.params.id)});
+
+    var reportedsrd = await client.db("konoha").collection("subreddit").findOne({name : req.params.name});
+    update = {$inc : {deletedPosts : 1}};
+    result = await client.db("konoha").collection("subreddit").updateOne(reportedsrd, update);
     console.log(result);
     res.json(result);
     }
@@ -846,6 +911,7 @@ app.post('/register', async (req, res) => {
     uobj.password = hash
     uobj.followers = []
     uobj.following = []
+    uobj.leftSubreddits = []
     uobj.savedPosts = []
     try{
     result = await client.db("konoha").collection("users").insertOne(uobj);
